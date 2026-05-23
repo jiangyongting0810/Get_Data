@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src https://mms.pinduoduo.com;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDD Trade Exporter</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Pinduoduo Desktop</p>
+          <h1>昨天交易概况导出</h1>
+          <p class="summary">
+            第一版先做拼多多商家后台登录和昨天交易数据导出。你在程序内登录，后续由程序复用登录态取接口并生成 Excel。
+          </p>
+        </div>
+
+        <section class="panel">
+          <h2>当前范围</h2>
+          <ul>
+            <li>平台：拼多多商家后台</li>
+            <li>时间：昨天</li>
+            <li>输出：Excel</li>
+            <li>数据：昨日汇总 + 昨日小时明细</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h2>下一步</h2>
+          <ol>
+            <li>右侧内嵌页面登录拼多多商家后台</li>
+            <li>停留在交易概况页面，等待接口自动返回</li>
+            <li>点击“导出昨天 Excel”生成报表</li>
+          </ol>
+        </section>
+      </aside>
+
+      <main class="content">
+        <div class="toolbar">
+          <div>
+            <p class="toolbar-title">运行面板</p>
+            <p class="toolbar-subtitle">第一版直接监听拼多多后台页面自己的接口响应。</p>
+          </div>
+          <div class="toolbar-actions">
+            <button id="reload-page" class="secondary-button">刷新页面</button>
+            <button id="export-report" class="primary-button" disabled>导出昨天 Excel</button>
+          </div>
+        </div>
+
+        <section class="workspace-card">
+          <h2>项目状态</h2>
+          <div class="status-grid">
+            <article>
+              <span class="status-label">桌面框架</span>
+              <strong>已准备</strong>
+            </article>
+            <article>
+              <span class="status-label">登录窗口</span>
+              <strong>已接入</strong>
+            </article>
+            <article>
+              <span class="status-label">接口抓取</span>
+              <strong>监听页面响应</strong>
+            </article>
+            <article>
+              <span class="status-label">Excel 导出</span>
+              <strong>已接入</strong>
+            </article>
+          </div>
+
+          <div class="log-box">
+            <p id="entry-url" class="log-line">正在读取拼多多后台入口...</p>
+            <p id="capture-status" class="log-line muted">尚未捕获到昨天交易接口响应。</p>
+            <p id="export-status" class="log-line muted">导出完成后会显示保存路径。</p>
+          </div>
+
+          <div class="browser-shell">
+            <webview id="pdd-webview" class="browser-view"></webview>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
