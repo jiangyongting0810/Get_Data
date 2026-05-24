@@ -11,72 +11,124 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell app-shell-wide">
       <aside class="sidebar">
         <div>
-          <p class="eyebrow">Pinduoduo Desktop</p>
-          <h1>昨天交易概况导出</h1>
+          <p class="eyebrow">Config Center</p>
+          <h1>软件内报表配置</h1>
           <p class="summary">
-            第一版先做拼多多商家后台登录和昨天交易数据导出。你在程序内登录，后续由程序复用登录态取接口并生成 Excel。
+            这一版支持直接在软件里维护报表定义，并保存到本地 JSON。新增页面时，优先改配置，不先改代码。
           </p>
         </div>
 
         <section class="panel">
-          <h2>当前范围</h2>
-          <ul>
-            <li>平台：拼多多商家后台</li>
-            <li>时间：昨天</li>
-            <li>输出：Excel</li>
-            <li>数据：昨日汇总 + 昨日小时明细</li>
-          </ul>
+          <h2>报表选择</h2>
+          <label class="field-label" for="report-select">当前报表</label>
+          <select id="report-select" class="field-input"></select>
+          <p id="report-description" class="note-text"></p>
+          <p id="report-config-path" class="note-text"></p>
         </section>
 
         <section class="panel">
-          <h2>下一步</h2>
-          <ol>
-            <li>右侧内嵌页面登录拼多多商家后台</li>
-            <li>停留在交易概况页面，等待接口自动返回</li>
-            <li>点击“导出昨天 Excel”生成报表</li>
-          </ol>
+          <h2>配置操作</h2>
+          <div class="stack-buttons">
+            <button id="new-report" class="secondary-button">新建报表</button>
+            <button id="save-report" class="primary-button">保存当前配置</button>
+            <button id="delete-report" class="danger-button">删除当前报表</button>
+            <button id="reset-defaults" class="secondary-button">恢复默认报表</button>
+          </div>
+          <p id="config-status" class="note-text"></p>
         </section>
       </aside>
 
-      <main class="content">
-        <div class="toolbar">
-          <div>
-            <p class="toolbar-title">运行面板</p>
-            <p class="toolbar-subtitle">第一版直接监听拼多多后台页面自己的接口响应。</p>
+      <main class="content content-split">
+        <section class="workspace-card config-card">
+          <div class="toolbar compact-toolbar">
+            <div>
+              <p class="toolbar-title">配置编辑器</p>
+              <p class="toolbar-subtitle">
+                Sheet 和 columns 先用 JSON 文本编辑，后面再做更细的可视化编辑。
+              </p>
+            </div>
           </div>
-          <div class="toolbar-actions">
-            <button id="reload-page" class="secondary-button">刷新页面</button>
-            <button id="export-report" class="primary-button" disabled>导出昨天 Excel</button>
-          </div>
-        </div>
 
-        <section class="workspace-card">
-          <h2>项目状态</h2>
+          <div class="form-grid">
+            <label class="form-block">
+              <span class="field-label">报表 ID</span>
+              <input id="report-id" class="field-input" />
+            </label>
+            <label class="form-block">
+              <span class="field-label">报表名称</span>
+              <input id="report-name" class="field-input" />
+            </label>
+            <label class="form-block form-block-wide">
+              <span class="field-label">描述</span>
+              <input id="report-description-input" class="field-input" />
+            </label>
+            <label class="form-block form-block-wide">
+              <span class="field-label">页面 URL</span>
+              <input id="report-page-url" class="field-input" />
+            </label>
+            <label class="form-block form-block-wide">
+              <span class="field-label">接口关键词</span>
+              <input id="report-request-match" class="field-input" />
+            </label>
+            <label class="form-block">
+              <span class="field-label">导出文件名前缀</span>
+              <input id="report-file-name-prefix" class="field-input" />
+            </label>
+            <label class="form-block">
+              <span class="field-label">日期字段路径</span>
+              <input id="report-query-date-path" class="field-input" />
+            </label>
+            <label class="form-block">
+              <span class="field-label">默认日期偏移</span>
+              <input id="report-default-date-offset" class="field-input" />
+            </label>
+            <label class="form-block form-block-wide">
+              <span class="field-label">Sheets JSON</span>
+              <textarea id="report-sheets-json" class="field-textarea" spellcheck="false"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="workspace-card run-card">
+          <div class="toolbar">
+            <div>
+              <p class="toolbar-title">运行面板</p>
+              <p class="toolbar-subtitle">
+                切换报表后，程序会跳到对应页面，并监听对应接口响应。
+              </p>
+            </div>
+            <div class="toolbar-actions">
+              <button id="reload-page" class="secondary-button">刷新页面</button>
+              <button id="open-page" class="secondary-button">打开对应页面</button>
+              <button id="export-report" class="primary-button" disabled>导出当前报表</button>
+            </div>
+          </div>
+
           <div class="status-grid">
             <article>
-              <span class="status-label">桌面框架</span>
-              <strong>已准备</strong>
+              <span class="status-label">配置来源</span>
+              <strong>本地 reports.json</strong>
             </article>
             <article>
-              <span class="status-label">登录窗口</span>
-              <strong>已接入</strong>
+              <span class="status-label">接口匹配</span>
+              <strong>按关键词监听</strong>
             </article>
             <article>
-              <span class="status-label">接口抓取</span>
-              <strong>监听页面响应</strong>
+              <span class="status-label">导出方式</span>
+              <strong>按 Sheet 配置生成</strong>
             </article>
             <article>
-              <span class="status-label">Excel 导出</span>
-              <strong>已接入</strong>
+              <span class="status-label">扩展路径</span>
+              <strong>先改配置，再补代码</strong>
             </article>
           </div>
 
           <div class="log-box">
-            <p id="entry-url" class="log-line">正在读取拼多多后台入口...</p>
-            <p id="capture-status" class="log-line muted">尚未捕获到昨天交易接口响应。</p>
+            <p id="entry-url" class="log-line">正在读取报表配置...</p>
+            <p id="capture-status" class="log-line muted">尚未捕获到当前报表的接口响应。</p>
             <p id="export-status" class="log-line muted">导出完成后会显示保存路径。</p>
           </div>
 

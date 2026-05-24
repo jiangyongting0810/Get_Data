@@ -1,19 +1,151 @@
+const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const XLSX = require("xlsx");
-
-const PDD_ENTRY_URL =
-  "https://mms.pinduoduo.com/sycm/stores_data/operation?currentKey=payOrdrAmt";
+const { defaultReportDefinitions } = require("./report-definitions");
 
 let mainWindow;
-const tradeCaptureCache = new Map();
-const pendingTradeRequests = new Map();
+let activeReports = [];
 
-function isTargetTradeRequest(url) {
-  return typeof url === "string" && url.includes("/sydney/api/mallTrade/queryMallTradeList");
+const captureCache = new Map();
+const pendingRequestMap = new Map();
+
+function getReportsConfigPath() {
+  return path.join(app.getPath("userData"), "reports.json");
 }
 
-async function attachTradeDebugger(webContents) {
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function loadReportsFromDisk() {
+  const configPath = getReportsConfigPath();
+
+  if (!fs.existsSync(configPath)) {
+    activeReports = clone(defaultReportDefinitions);
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    activeReports = Array.isArray(parsed) && parsed.length > 0
+      ? parsed
+      : clone(defaultReportDefinitions);
+  } catch (_error) {
+    activeReports = clone(defaultReportDefinitions);
+  }
+}
+
+function saveReportsToDisk() {
+  const configPath = getReportsConfigPath();
+  fs.writeFileSync(configPath, JSON.stringify(activeReports, null, 2), "utf8");
+}
+
+function getReportDefinitionMap() {
+  return Object.fromEntries(activeReports.map((report) => [report.id, report]));
+}
+
+function getByPath(target, pathExpression) {
+  if (!pathExpression) {
+    return target;
+  }
+
+  return String(pathExpression)
+    .split(".")
+    .filter(Boolean)
+    .reduce((current, key) => {
+      if (current == null) {
+        return undefined;
+      }
+
+      return current[key];
+    }, target);
+}
+
+function formatValue(value, column) {
+  if (value == null) {
+    return "";
+  }
+
+  if (column.format === "percent" && typeof value === "number") {
+    return `${(value * 100).toFixed(2)}%`;
+  }
+
+  return value;
+}
+
+function fallbackDate(offsetDays) {
+  const value = new Date();
+  value.setDate(value.getDate() + offsetDays);
+  return value.toISOString().slice(0, 10);
+}
+
+function getCaptureDate(reportDefinition, responseData) {
+  const pathValue = getByPath(responseData, reportDefinition.queryDatePath);
+  if (pathValue) {
+    return pathValue;
+  }
+
+  if (reportDefinition.defaultDateOffset != null) {
+    return fallbackDate(reportDefinition.defaultDateOffset);
+  }
+
+  return fallbackDate(-1);
+}
+
+function matchReportByUrl(url) {
+  return activeReports.find(
+    (definition) =>
+      typeof definition.requestMatch === "string" &&
+      definition.requestMatch &&
+      url.includes(definition.requestMatch)
+  );
+}
+
+function buildSheetRows(sheetDefinition, capture) {
+  const sourceValue = getByPath(capture.data, sheetDefinition.sourcePath);
+  const rows =
+    sheetDefinition.mode === "last"
+      ? Array.isArray(sourceValue) && sourceValue.length > 0
+        ? [sourceValue[sourceValue.length - 1]]
+        : []
+      : Array.isArray(sourceValue)
+        ? sourceValue
+        : [];
+
+  if (rows.length === 0) {
+    throw new Error(`Sheet ${sheetDefinition.name} 没有可导出的数据。`);
+  }
+
+  return rows.map((row) => {
+    const result = {};
+
+    for (const column of sheetDefinition.columns) {
+      const value =
+        column.value === "$queryDate"
+          ? capture.queryDate
+          : getByPath(row, column.path);
+
+      result[column.title] = formatValue(value, column);
+    }
+
+    return result;
+  });
+}
+
+function buildWorkbook(reportDefinition, capture) {
+  const workbook = XLSX.utils.book_new();
+
+  for (const sheetDefinition of reportDefinition.sheets || []) {
+    const rows = buildSheetRows(sheetDefinition, capture);
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, sheet, sheetDefinition.name);
+  }
+
+  return workbook;
+}
+
+async function attachWebviewDebugger(webContents) {
   if (!webContents || webContents.isDestroyed()) {
     return;
   }
@@ -27,81 +159,85 @@ async function attachTradeDebugger(webContents) {
   webContents.debugger.on("message", async (_event, method, params) => {
     if (method === "Network.responseReceived") {
       const { requestId, response } = params;
+      const reportDefinition = matchReportByUrl(response?.url || "");
 
-      if (isTargetTradeRequest(response?.url)) {
-        pendingTradeRequests.set(requestId, response.url);
+      if (reportDefinition) {
+        pendingRequestMap.set(requestId, {
+          url: response.url,
+          reportId: reportDefinition.id
+        });
       }
       return;
     }
 
-    if (method === "Network.loadingFinished") {
-      const requestId = params?.requestId;
+    if (method !== "Network.loadingFinished") {
+      return;
+    }
 
-      if (!pendingTradeRequests.has(requestId)) {
+    const requestId = params?.requestId;
+    if (!pendingRequestMap.has(requestId)) {
+      return;
+    }
+
+    const pending = pendingRequestMap.get(requestId);
+    pendingRequestMap.delete(requestId);
+
+    try {
+      const bodyResult = await webContents.debugger.sendCommand(
+        "Network.getResponseBody",
+        { requestId }
+      );
+
+      const bodyText = bodyResult?.base64Encoded
+        ? Buffer.from(bodyResult.body, "base64").toString("utf8")
+        : bodyResult.body;
+      const data = JSON.parse(bodyText);
+      const reportDefinition = getReportDefinitionMap()[pending.reportId];
+
+      if (!reportDefinition) {
         return;
       }
 
-      const requestUrl = pendingTradeRequests.get(requestId);
-      pendingTradeRequests.delete(requestId);
+      const capture = {
+        reportId: pending.reportId,
+        url: pending.url,
+        capturedAt: new Date().toISOString(),
+        queryDate: getCaptureDate(reportDefinition, data),
+        data
+      };
 
-      try {
-        const bodyResult = await webContents.debugger.sendCommand(
-          "Network.getResponseBody",
-          { requestId }
-        );
+      captureCache.set(`${webContents.id}:${pending.reportId}`, capture);
 
-        const bodyText = bodyResult?.base64Encoded
-          ? Buffer.from(bodyResult.body, "base64").toString("utf8")
-          : bodyResult.body;
-
-        const data = JSON.parse(bodyText);
-        tradeCaptureCache.set(webContents.id, {
-          data,
-          capturedAt: new Date().toISOString(),
-          url: requestUrl,
-          queryDate: getQueryDateFromTradeData(data)
-        });
-
-        mainWindow?.webContents.send("trade:capture-status", {
-          ok: true,
-          queryDate: getQueryDateFromTradeData(data)
-        });
-      } catch (error) {
-        mainWindow?.webContents.send("trade:capture-status", {
-          ok: false,
-          message: `读取接口响应失败：${error.message}`
-        });
-      }
+      mainWindow?.webContents.send("capture:status", {
+        ok: true,
+        reportId: pending.reportId,
+        queryDate: capture.queryDate,
+        reportName: reportDefinition.name
+      });
+    } catch (error) {
+      mainWindow?.webContents.send("capture:status", {
+        ok: false,
+        reportId: pending.reportId,
+        message: `读取接口响应失败：${error.message}`
+      });
     }
   });
 
   webContents.once("destroyed", () => {
-    tradeCaptureCache.delete(webContents.id);
+    for (const key of [...captureCache.keys()]) {
+      if (key.startsWith(`${webContents.id}:`)) {
+        captureCache.delete(key);
+      }
+    }
   });
-}
-
-function getQueryDateFromTradeData(data) {
-  const yesterdayList = data?.result?.yesterdayRtList;
-  if (!Array.isArray(yesterdayList) || yesterdayList.length === 0) {
-    return "";
-  }
-
-  const datedItem = yesterdayList.find((item) => item?.stateDate);
-  if (datedItem?.stateDate) {
-    return datedItem.stateDate;
-  }
-
-  const fallback = new Date();
-  fallback.setDate(fallback.getDate() - 1);
-  return fallback.toISOString().slice(0, 10);
 }
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 1200,
-    minHeight: 760,
+    width: 1540,
+    height: 960,
+    minWidth: 1280,
+    minHeight: 800,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -121,9 +257,9 @@ function createMainWindow() {
 
   mainWindow.webContents.on("did-attach-webview", async (_event, webContents) => {
     try {
-      await attachTradeDebugger(webContents);
+      await attachWebviewDebugger(webContents);
     } catch (error) {
-      mainWindow?.webContents.send("trade:capture-status", {
+      mainWindow?.webContents.send("capture:status", {
         ok: false,
         message: `网络监听启动失败：${error.message}`
       });
@@ -131,7 +267,41 @@ function createMainWindow() {
   });
 }
 
+function validateReportDefinition(report) {
+  if (!report || typeof report !== "object") {
+    throw new Error("报表配置不能为空。");
+  }
+
+  const requiredFields = ["id", "name", "pageUrl", "requestMatch", "fileNamePrefix"];
+  for (const field of requiredFields) {
+    if (!report[field] || typeof report[field] !== "string") {
+      throw new Error(`报表字段 ${field} 必填。`);
+    }
+  }
+
+  if (!Array.isArray(report.sheets) || report.sheets.length === 0) {
+    throw new Error("至少需要一个 Sheet 配置。");
+  }
+}
+
+function listReportsForRenderer() {
+  return activeReports.map((definition) => ({
+    id: definition.id,
+    name: definition.name,
+    description: definition.description || "",
+    pageUrl: definition.pageUrl,
+    requestMatch: definition.requestMatch,
+    fileNamePrefix: definition.fileNamePrefix,
+    queryDatePath: definition.queryDatePath || "",
+    defaultDateOffset:
+      definition.defaultDateOffset == null ? "" : String(definition.defaultDateOffset),
+    sheetNames: (definition.sheets || []).map((sheet) => sheet.name),
+    raw: clone(definition)
+  }));
+}
+
 app.whenReady().then(() => {
+  loadReportsFromDisk();
   createMainWindow();
 
   app.on("activate", () => {
@@ -147,96 +317,40 @@ app.on("window-all-closed", () => {
   }
 });
 
-ipcMain.handle("app:get-config", async () => {
-  return {
-    pddEntryUrl: PDD_ENTRY_URL
-  };
+ipcMain.handle("app:get-config", async () => ({
+  reports: listReportsForRenderer(),
+  reportsConfigPath: getReportsConfigPath()
+}));
+
+ipcMain.handle("capture:get-latest", async (_event, payload) => {
+  const webContentsId = payload?.webContentsId;
+  const reportId = payload?.reportId;
+
+  if (!webContentsId || !reportId) {
+    return null;
+  }
+
+  return captureCache.get(`${webContentsId}:${reportId}`) || null;
 });
 
-function formatPercent(value) {
-  if (typeof value !== "number") {
-    return "";
+ipcMain.handle("report:export", async (_event, payload) => {
+  const reportDefinition = getReportDefinitionMap()[payload?.reportId];
+  if (!reportDefinition) {
+    throw new Error("未找到对应的报表配置。");
   }
 
-  return `${(value * 100).toFixed(2)}%`;
-}
-
-function normalizeDate(requestBody) {
-  if (requestBody && typeof requestBody === "object" && requestBody.queryDate) {
-    return requestBody.queryDate;
+  if (!payload?.data?.success) {
+    throw new Error("当前没有可导出的接口响应数据。");
   }
 
-  const fallback = new Date();
-  fallback.setDate(fallback.getDate() - 1);
-  return fallback.toISOString().slice(0, 10);
-}
-
-function buildSummaryRows(data, queryDate) {
-  const cumulativeList = data?.result?.yesterdayRtList;
-  const summary = Array.isArray(cumulativeList)
-    ? cumulativeList[cumulativeList.length - 1]
-    : null;
-
-  if (!summary) {
-    throw new Error("昨天汇总数据不存在。");
-  }
-
-  return [
-    {
-      日期: queryDate,
-      成交金额: summary.payOrdrAmt ?? "",
-      成交订单数: summary.payOrdrCnt ?? "",
-      成交买家数: summary.payOrdrUsrCnt ?? "",
-      客单价: summary.payOrdrAup ?? "",
-      成交转化率: formatPercent(summary.payUvRto),
-      成交老买家占比: formatPercent(summary.rpayUsrRtoDth)
-    }
-  ];
-}
-
-function buildHourlyRows(data, queryDate) {
-  const hourlyList = data?.result?.yesterdayPerHourRtList;
-
-  if (!Array.isArray(hourlyList)) {
-    throw new Error("昨天小时明细不存在。");
-  }
-
-  return hourlyList.map((item) => ({
-    日期: queryDate,
-    小时: item.hr ?? "",
-    小时订单数: item.payOrdrCnt ?? "",
-    小时买家数: item.payOrdrUsrCnt ?? "",
-    小时成交金额: item.payOrdrAmt ?? ""
-  }));
-}
-
-ipcMain.handle("report:export-yesterday", async (_event, payload) => {
-  const data = payload?.data;
-  const queryDate = normalizeDate(payload);
-
-  if (!data?.success) {
-    throw new Error("当前没有可导出的拼多多昨天数据。");
-  }
-
-  const workbook = XLSX.utils.book_new();
-
-  const summarySheet = XLSX.utils.json_to_sheet(
-    buildSummaryRows(data, queryDate)
-  );
-  XLSX.utils.book_append_sheet(workbook, summarySheet, "昨日汇总");
-
-  const hourlySheet = XLSX.utils.json_to_sheet(
-    buildHourlyRows(data, queryDate)
-  );
-  XLSX.utils.book_append_sheet(workbook, hourlySheet, "昨日小时明细");
-
+  const workbook = buildWorkbook(reportDefinition, payload);
   const defaultPath = path.join(
     app.getPath("downloads"),
-    `pdd-yesterday-report-${queryDate || "unknown"}.xlsx`
+    `${reportDefinition.fileNamePrefix}-${payload.queryDate || "unknown"}.xlsx`
   );
 
   const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: "导出拼多多昨日交易概况",
+    title: `导出 ${reportDefinition.name}`,
     defaultPath,
     filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }]
   });
@@ -246,19 +360,47 @@ ipcMain.handle("report:export-yesterday", async (_event, payload) => {
   }
 
   XLSX.writeFile(workbook, filePath);
+  return { canceled: false, filePath };
+});
 
+ipcMain.handle("reports:save", async (_event, payload) => {
+  const report = clone(payload?.report);
+  validateReportDefinition(report);
+
+  const index = activeReports.findIndex((item) => item.id === report.id);
+  if (index >= 0) {
+    activeReports[index] = report;
+  } else {
+    activeReports.push(report);
+  }
+
+  saveReportsToDisk();
   return {
-    canceled: false,
-    filePath
+    reports: listReportsForRenderer(),
+    reportsConfigPath: getReportsConfigPath()
   };
 });
 
-ipcMain.handle("trade:get-latest-capture", async (_event, payload) => {
-  const webContentsId = payload?.webContentsId;
+ipcMain.handle("reports:delete", async (_event, payload) => {
+  const reportId = payload?.reportId;
+  activeReports = activeReports.filter((item) => item.id !== reportId);
 
-  if (!webContentsId || !tradeCaptureCache.has(webContentsId)) {
-    return null;
+  if (activeReports.length === 0) {
+    activeReports = clone(defaultReportDefinitions);
   }
 
-  return tradeCaptureCache.get(webContentsId);
+  saveReportsToDisk();
+  return {
+    reports: listReportsForRenderer(),
+    reportsConfigPath: getReportsConfigPath()
+  };
+});
+
+ipcMain.handle("reports:reset-defaults", async () => {
+  activeReports = clone(defaultReportDefinitions);
+  saveReportsToDisk();
+  return {
+    reports: listReportsForRenderer(),
+    reportsConfigPath: getReportsConfigPath()
+  };
 });
