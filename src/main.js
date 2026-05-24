@@ -77,7 +77,10 @@ function formatValue(value, column) {
 function fallbackDate(offsetDays) {
   const value = new Date();
   value.setDate(value.getDate() + offsetDays);
-  return value.toISOString().slice(0, 10);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getCaptureDate(reportDefinition, responseData) {
@@ -93,8 +96,8 @@ function getCaptureDate(reportDefinition, responseData) {
   return fallbackDate(-1);
 }
 
-function matchReportByUrl(url) {
-  return activeReports.find(
+function matchReportsByUrl(url) {
+  return activeReports.filter(
     (definition) =>
       typeof definition.requestMatch === "string" &&
       definition.requestMatch &&
@@ -104,14 +107,19 @@ function matchReportByUrl(url) {
 
 function buildSheetRows(sheetDefinition, capture) {
   const sourceValue = getByPath(capture.data, sheetDefinition.sourcePath);
-  const rows =
-    sheetDefinition.mode === "last"
-      ? Array.isArray(sourceValue) && sourceValue.length > 0
-        ? [sourceValue[sourceValue.length - 1]]
-        : []
-      : Array.isArray(sourceValue)
-        ? sourceValue
-        : [];
+  let rows = [];
+
+  if (sheetDefinition.mode === "object") {
+    if (sourceValue && typeof sourceValue === "object" && !Array.isArray(sourceValue)) {
+      rows = [sourceValue];
+    }
+  } else if (sheetDefinition.mode === "last") {
+    if (Array.isArray(sourceValue) && sourceValue.length > 0) {
+      rows = [sourceValue[sourceValue.length - 1]];
+    }
+  } else if (Array.isArray(sourceValue)) {
+    rows = sourceValue;
+  }
 
   if (rows.length === 0) {
     throw new Error(`Sheet ${sheetDefinition.name} 没有可导出的数据。`);
@@ -157,16 +165,24 @@ async function attachWebviewDebugger(webContents) {
   await webContents.debugger.sendCommand("Network.enable");
 
   webContents.debugger.on("message", async (_event, method, params) => {
-    if (method === "Network.responseReceived") {
-      const { requestId, response } = params;
-      const reportDefinition = matchReportByUrl(response?.url || "");
+    const requestId = params?.requestId;
+    const pendingKey = `${webContents.id}:${requestId}`;
 
-      if (reportDefinition) {
-        pendingRequestMap.set(requestId, {
+    if (method === "Network.responseReceived") {
+      const { response } = params;
+      const matchedReports = matchReportsByUrl(response?.url || "");
+
+      if (matchedReports.length > 0) {
+        pendingRequestMap.set(pendingKey, {
           url: response.url,
-          reportId: reportDefinition.id
+          reportIds: matchedReports.map((report) => report.id)
         });
       }
+      return;
+    }
+
+    if (method === "Network.loadingFailed") {
+      pendingRequestMap.delete(pendingKey);
       return;
     }
 
@@ -174,13 +190,12 @@ async function attachWebviewDebugger(webContents) {
       return;
     }
 
-    const requestId = params?.requestId;
-    if (!pendingRequestMap.has(requestId)) {
+    if (!pendingRequestMap.has(pendingKey)) {
       return;
     }
 
-    const pending = pendingRequestMap.get(requestId);
-    pendingRequestMap.delete(requestId);
+    const pending = pendingRequestMap.get(pendingKey);
+    pendingRequestMap.delete(pendingKey);
 
     try {
       const bodyResult = await webContents.debugger.sendCommand(
@@ -192,34 +207,39 @@ async function attachWebviewDebugger(webContents) {
         ? Buffer.from(bodyResult.body, "base64").toString("utf8")
         : bodyResult.body;
       const data = JSON.parse(bodyText);
-      const reportDefinition = getReportDefinitionMap()[pending.reportId];
+      const reportDefinitionMap = getReportDefinitionMap();
 
-      if (!reportDefinition) {
-        return;
+      for (const reportId of pending.reportIds) {
+        const reportDefinition = reportDefinitionMap[reportId];
+        if (!reportDefinition) {
+          continue;
+        }
+
+        const capture = {
+          reportId,
+          url: pending.url,
+          capturedAt: new Date().toISOString(),
+          queryDate: getCaptureDate(reportDefinition, data),
+          data
+        };
+
+        captureCache.set(`${webContents.id}:${reportId}`, capture);
+
+        mainWindow?.webContents.send("capture:status", {
+          ok: true,
+          reportId,
+          queryDate: capture.queryDate,
+          reportName: reportDefinition.name
+        });
       }
-
-      const capture = {
-        reportId: pending.reportId,
-        url: pending.url,
-        capturedAt: new Date().toISOString(),
-        queryDate: getCaptureDate(reportDefinition, data),
-        data
-      };
-
-      captureCache.set(`${webContents.id}:${pending.reportId}`, capture);
-
-      mainWindow?.webContents.send("capture:status", {
-        ok: true,
-        reportId: pending.reportId,
-        queryDate: capture.queryDate,
-        reportName: reportDefinition.name
-      });
     } catch (error) {
-      mainWindow?.webContents.send("capture:status", {
-        ok: false,
-        reportId: pending.reportId,
-        message: `读取接口响应失败：${error.message}`
-      });
+      for (const reportId of pending.reportIds) {
+        mainWindow?.webContents.send("capture:status", {
+          ok: false,
+          reportId,
+          message: `读取接口响应失败：${error.message}`
+        });
+      }
     }
   });
 
@@ -227,6 +247,11 @@ async function attachWebviewDebugger(webContents) {
     for (const key of [...captureCache.keys()]) {
       if (key.startsWith(`${webContents.id}:`)) {
         captureCache.delete(key);
+      }
+    }
+    for (const key of [...pendingRequestMap.keys()]) {
+      if (key.startsWith(`${webContents.id}:`)) {
+        pendingRequestMap.delete(key);
       }
     }
   });
@@ -274,13 +299,79 @@ function validateReportDefinition(report) {
 
   const requiredFields = ["id", "name", "pageUrl", "requestMatch", "fileNamePrefix"];
   for (const field of requiredFields) {
-    if (!report[field] || typeof report[field] !== "string") {
+    if (typeof report[field] !== "string" || report[field].trim() === "") {
       throw new Error(`报表字段 ${field} 必填。`);
     }
   }
 
+  if (report.description != null && typeof report.description !== "string") {
+    throw new Error("报表字段 description 必须是文本。");
+  }
+  if (report.queryDatePath != null && typeof report.queryDatePath !== "string") {
+    throw new Error("报表字段 queryDatePath 必须是文本。");
+  }
+
   if (!Array.isArray(report.sheets) || report.sheets.length === 0) {
     throw new Error("至少需要一个 Sheet 配置。");
+  }
+
+  if (
+    report.defaultDateOffset != null &&
+    (!Number.isInteger(report.defaultDateOffset) || !Number.isFinite(report.defaultDateOffset))
+  ) {
+    throw new Error("默认日期偏移必须是整数。");
+  }
+
+  const sheetNames = new Set();
+  for (const [sheetIndex, sheet] of report.sheets.entries()) {
+    const label = `第 ${sheetIndex + 1} 个 Sheet`;
+    if (!sheet || typeof sheet !== "object") {
+      throw new Error(`${label} 配置无效。`);
+    }
+    if (!sheet.name || typeof sheet.name !== "string") {
+      throw new Error(`${label} 名称必填。`);
+    }
+    if (sheet.name.length > 31 || /[\\/?*[\]:]/.test(sheet.name)) {
+      throw new Error(`${label} 名称不符合 Excel 工作表命名规则。`);
+    }
+    if (sheetNames.has(sheet.name)) {
+      throw new Error(`Sheet 名称不能重复：${sheet.name}。`);
+    }
+    sheetNames.add(sheet.name);
+
+    if (!["list", "last", "object"].includes(sheet.mode)) {
+      throw new Error(`${label} mode 仅支持 list、last 或 object。`);
+    }
+    if (!sheet.sourcePath || typeof sheet.sourcePath !== "string") {
+      throw new Error(`${label} sourcePath 必填。`);
+    }
+    if (!Array.isArray(sheet.columns) || sheet.columns.length === 0) {
+      throw new Error(`${label} 至少需要一列。`);
+    }
+
+    const columnTitles = new Set();
+    for (const [columnIndex, column] of sheet.columns.entries()) {
+      const columnLabel = `${label} 的第 ${columnIndex + 1} 列`;
+      if (!column || typeof column !== "object") {
+        throw new Error(`${columnLabel} 配置无效。`);
+      }
+      if (!column.title || typeof column.title !== "string") {
+        throw new Error(`${columnLabel} title 必填。`);
+      }
+      if (columnTitles.has(column.title)) {
+        throw new Error(`${label} 的列名不能重复：${column.title}。`);
+      }
+      columnTitles.add(column.title);
+
+      const hasPath = typeof column.path === "string" && column.path.length > 0;
+      const usesQueryDate = column.value === "$queryDate";
+      if (!hasPath && !usesQueryDate) {
+        throw new Error(`${columnLabel} 需要 path 或 value: "$queryDate"。`);
+      }
+      if (column.format != null && column.format !== "percent") {
+        throw new Error(`${columnLabel} format 仅支持 percent。`);
+      }
+    }
   }
 }
 
@@ -339,6 +430,8 @@ ipcMain.handle("report:export", async (_event, payload) => {
     throw new Error("未找到对应的报表配置。");
   }
 
+  validateReportDefinition(reportDefinition);
+
   if (!payload?.data?.success) {
     throw new Error("当前没有可导出的接口响应数据。");
   }
@@ -364,12 +457,24 @@ ipcMain.handle("report:export", async (_event, payload) => {
 });
 
 ipcMain.handle("reports:save", async (_event, payload) => {
-  const report = clone(payload?.report);
-  validateReportDefinition(report);
+  validateReportDefinition(payload?.report);
+  const report = clone(payload.report);
 
-  const index = activeReports.findIndex((item) => item.id === report.id);
-  if (index >= 0) {
-    activeReports[index] = report;
+  const previousReportId = payload?.previousReportId;
+  if (previousReportId) {
+    const previousIndex = activeReports.findIndex((item) => item.id === previousReportId);
+    if (previousIndex < 0) {
+      throw new Error("原报表配置已不存在，请重新选择后保存。");
+    }
+    if (
+      report.id !== previousReportId &&
+      activeReports.some((item) => item.id === report.id)
+    ) {
+      throw new Error(`报表 ID 已存在：${report.id}。`);
+    }
+    activeReports[previousIndex] = report;
+  } else if (activeReports.some((item) => item.id === report.id)) {
+    throw new Error(`报表 ID 已存在：${report.id}。`);
   } else {
     activeReports.push(report);
   }

@@ -17,10 +17,6 @@ body {
   min-height: 100vh;
 }
 
-.app-shell-wide {
-  grid-template-columns: 360px 1fr;
-}
-
 .sidebar {
   display: flex;
   flex-direction: column;

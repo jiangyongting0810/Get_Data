@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src https://mms.pinduoduo.com;"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src https://mms.pinduoduo.com https://yingxiao.pinduoduo.com;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PDD Trade Exporter</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="app-shell app-shell-wide">
+    <div class="app-shell">
       <aside class="sidebar">
         <div>
           <p class="eyebrow">Config Center</p>
@@ -53,10 +53,6 @@
           </div>
 
           <div class="form-grid">
-            <label class="form-block">
-              <span class="field-label">报表 ID</span>
-              <input id="report-id" class="field-input" />
-            </label>
             <label class="form-block">
               <span class="field-label">报表名称</span>
               <input id="report-name" class="field-input" />

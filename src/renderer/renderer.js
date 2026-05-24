@@ -71,7 +71,6 @@ function renderReportMeta(report) {
 
 function fillForm(report) {
   const raw = report.raw || {};
-  formFields.id.value = raw.id || "";
   formFields.name.value = raw.name || "";
   formFields.description.value = raw.description || "";
   formFields.pageUrl.value = raw.pageUrl || "";
@@ -106,13 +105,19 @@ async function loadActiveReportIntoWebview(webview) {
 }
 
 function readFormReport() {
-  const id = formFields.id.value.trim();
+  const id = activeReport?.raw?.id || activeReport?.id || `report-${Date.now()}`;
   const name = formFields.name.value.trim();
   const pageUrl = formFields.pageUrl.value.trim();
   const requestMatch = formFields.requestMatch.value.trim();
   const fileNamePrefix = formFields.fileNamePrefix.value.trim();
   const queryDatePath = formFields.queryDatePath.value.trim();
   const defaultDateOffsetText = formFields.defaultDateOffset.value.trim();
+  const defaultDateOffset =
+    defaultDateOffsetText === "" ? undefined : Number(defaultDateOffsetText);
+
+  if (defaultDateOffset != null && !Number.isInteger(defaultDateOffset)) {
+    throw new Error("默认日期偏移必须是整数。");
+  }
 
   let sheets;
   try {
@@ -129,8 +134,7 @@ function readFormReport() {
     requestMatch,
     fileNamePrefix,
     queryDatePath,
-    defaultDateOffset:
-      defaultDateOffsetText === "" ? undefined : Number(defaultDateOffsetText),
+    defaultDateOffset,
     sheets
   };
 }
@@ -145,7 +149,6 @@ async function replaceConfig(newConfig) {
 }
 
 async function bootstrap() {
-  formFields.id = document.getElementById("report-id");
   formFields.name = document.getElementById("report-name");
   formFields.description = document.getElementById("report-description-input");
   formFields.pageUrl = document.getElementById("report-page-url");
@@ -199,7 +202,11 @@ async function bootstrap() {
   saveReportButton.addEventListener("click", async () => {
     try {
       const report = readFormReport();
-      const newConfig = await window.desktopApp.saveReport({ report });
+      const previousReportId = getReportById(activeReport?.id)?.id;
+      const newConfig = await window.desktopApp.saveReport({
+        report,
+        previousReportId
+      });
       await replaceConfig(newConfig);
       activeReport = getReportById(report.id);
       reportSelect.value = activeReport.id;
