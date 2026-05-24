@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("desktopApp", {
   getConfig: () => ipcRenderer.invoke("app:get-config"),
   getLatestCapture: (payload) => ipcRenderer.invoke("capture:get-latest", payload),
+  clearCaptures: (payload) => ipcRenderer.invoke("capture:clear", payload),
   exportReport: (payload) => ipcRenderer.invoke("report:export", payload),
   saveReport: (payload) => ipcRenderer.invoke("reports:save", payload),
   deleteReport: (payload) => ipcRenderer.invoke("reports:delete", payload),

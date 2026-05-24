@@ -33,6 +33,7 @@
           <h2>配置操作</h2>
           <div class="stack-buttons">
             <button id="new-report" class="secondary-button">新建报表</button>
+            <button id="new-combined-report" class="secondary-button">新建组合报表</button>
             <button id="save-report" class="primary-button">保存当前配置</button>
             <button id="delete-report" class="danger-button">删除当前报表</button>
             <button id="reset-defaults" class="secondary-button">恢复默认报表</button>
@@ -61,11 +62,11 @@
               <span class="field-label">描述</span>
               <input id="report-description-input" class="field-input" />
             </label>
-            <label class="form-block form-block-wide">
+            <label class="form-block form-block-wide single-report-field">
               <span class="field-label">页面 URL</span>
               <input id="report-page-url" class="field-input" />
             </label>
-            <label class="form-block form-block-wide">
+            <label class="form-block form-block-wide single-report-field">
               <span class="field-label">接口关键词</span>
               <input id="report-request-match" class="field-input" />
             </label>
@@ -73,18 +74,57 @@
               <span class="field-label">导出文件名前缀</span>
               <input id="report-file-name-prefix" class="field-input" />
             </label>
-            <label class="form-block">
+            <label class="form-block single-report-field">
               <span class="field-label">日期字段路径</span>
               <input id="report-query-date-path" class="field-input" />
             </label>
-            <label class="form-block">
+            <label class="form-block single-report-field">
               <span class="field-label">默认日期偏移</span>
               <input id="report-default-date-offset" class="field-input" />
             </label>
-            <label class="form-block form-block-wide">
+            <label class="form-block form-block-wide single-report-field">
               <span class="field-label">Sheets JSON</span>
               <textarea id="report-sheets-json" class="field-textarea" spellcheck="false"></textarea>
             </label>
+            <section id="add-to-combined-fields" class="form-block form-block-wide single-report-field add-to-combined-fields">
+              <h2>加入组合汇总</h2>
+              <p class="note-text">
+                当前页面配置保存后，可作为一组指标加入组合报表；以后更新时会覆盖该来源的组合设置。
+              </p>
+              <div class="association-grid">
+                <label class="form-block">
+                  <span class="field-label">目标组合报表</span>
+                  <select id="target-combined-report" class="field-input"></select>
+                </label>
+                <label class="form-block">
+                  <span class="field-label">当前页面的汇总 Sheet</span>
+                  <select id="source-summary-sheet" class="field-input"></select>
+                </label>
+              </div>
+              <p class="field-label association-label">拼入主汇总表的字段</p>
+              <div id="source-summary-columns" class="combined-column-picker"></div>
+              <label class="detail-toggle note-text">
+                <input id="source-include-details" type="checkbox" />
+                附带输出当前页面的其他明细 Sheet
+              </label>
+              <button id="add-to-combined" class="primary-button association-button" type="button">
+                保存并加入组合报表
+              </button>
+              <p id="add-to-combined-status" class="note-text"></p>
+            </section>
+            <section id="combined-fields" class="form-block form-block-wide combined-fields" hidden>
+              <label class="form-block">
+                <span class="field-label">主汇总 Sheet 名称</span>
+                <input id="combined-summary-sheet-name" class="field-input" value="汇总" />
+              </label>
+              <div class="combined-source-header">
+                <h2>已加入的页面数据</h2>
+              </div>
+              <p class="note-text">
+                数据来源请到对应的单页报表配置中添加；此处用于查看和移除已加入内容。
+              </p>
+              <div id="combined-sources" class="combined-source-list"></div>
+            </section>
           </div>
         </section>
 
@@ -96,7 +136,7 @@
                 切换报表后，程序会跳到对应页面，并监听对应接口响应。
               </p>
             </div>
-            <div class="toolbar-actions">
+            <div id="single-page-actions" class="toolbar-actions">
               <button id="reload-page" class="secondary-button">刷新页面</button>
               <button id="open-page" class="secondary-button">打开对应页面</button>
               <button id="export-report" class="primary-button" disabled>导出当前报表</button>
@@ -127,6 +167,22 @@
             <p id="capture-status" class="log-line muted">尚未捕获到当前报表的接口响应。</p>
             <p id="export-status" class="log-line muted">导出完成后会显示保存路径。</p>
           </div>
+
+          <section id="combined-run-panel" class="combined-run-panel" hidden>
+            <div class="combined-run-header">
+              <div>
+                <h2>组合采集流程</h2>
+                <p id="combined-progress" class="note-text">开始后将依次打开各数据来源页面。</p>
+              </div>
+              <div class="toolbar-actions">
+                <button id="start-combined" class="secondary-button">开始采集</button>
+                <button id="confirm-combined-source" class="primary-button" disabled>确认并下一页</button>
+                <button id="skip-combined-source" class="secondary-button" disabled>跳过当前来源</button>
+                <button id="export-combined" class="primary-button" disabled>导出组合报表</button>
+              </div>
+            </div>
+            <div id="combined-source-status" class="combined-status-list"></div>
+          </section>
 
           <div class="browser-shell">
             <webview id="pdd-webview" class="browser-view"></webview>

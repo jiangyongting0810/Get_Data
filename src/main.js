@@ -45,6 +45,10 @@ function getReportDefinitionMap() {
   return Object.fromEntries(activeReports.map((report) => [report.id, report]));
 }
 
+function isCombinedReport(report) {
+  return report?.type === "combined";
+}
+
 function getByPath(target, pathExpression) {
   if (!pathExpression) {
     return target;
@@ -99,6 +103,7 @@ function getCaptureDate(reportDefinition, responseData) {
 function matchReportsByUrl(url) {
   return activeReports.filter(
     (definition) =>
+      !isCombinedReport(definition) &&
       typeof definition.requestMatch === "string" &&
       definition.requestMatch &&
       url.includes(definition.requestMatch)
@@ -148,6 +153,91 @@ function buildWorkbook(reportDefinition, capture) {
     const rows = buildSheetRows(sheetDefinition, capture);
     const sheet = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(workbook, sheet, sheetDefinition.name);
+  }
+
+  return workbook;
+}
+
+function createEmptySheet(columns) {
+  const headers = (columns || []).map((column) => column.title);
+  return XLSX.utils.aoa_to_sheet([headers]);
+}
+
+function getUniqueSheetName(baseName, usedNames) {
+  const sanitizedName = String(baseName || "Sheet").replace(/[\\/?*[\]:]/g, "-");
+  let candidate = sanitizedName.slice(0, 31) || "Sheet";
+  let suffixIndex = 1;
+
+  while (usedNames.has(candidate)) {
+    const suffix = `-${suffixIndex}`;
+    candidate = `${sanitizedName.slice(0, 31 - suffix.length)}${suffix}`;
+    suffixIndex += 1;
+  }
+
+  usedNames.add(candidate);
+  return candidate;
+}
+
+function buildCombinedWorkbook(reportDefinition, capturesByReportId = {}) {
+  const workbook = XLSX.utils.book_new();
+  const reportDefinitionMap = getReportDefinitionMap();
+  const summaryRow = {};
+  const usedSheetNames = new Set();
+
+  for (const source of reportDefinition.sources) {
+    const sourceReport = reportDefinitionMap[source.reportId];
+    const summarySheet = sourceReport.sheets.find(
+      (sheet) => sheet.name === source.summarySheetName
+    );
+    const capture = capturesByReportId[source.reportId];
+    const selectedTitles = new Set(source.columns);
+    const selectedColumns = summarySheet.columns.filter((column) =>
+      column.value !== "$queryDate" && selectedTitles.has(column.title)
+    );
+    const emptySummaryRow = Object.fromEntries(
+      selectedColumns.map((column) => [column.title, ""])
+    );
+    const sourceSummaryRow = capture
+      ? buildSheetRows(summarySheet, capture)[0] || emptySummaryRow
+      : emptySummaryRow;
+
+    summaryRow[`${source.label}-日期`] = capture?.queryDate || "";
+    for (const column of selectedColumns) {
+      summaryRow[`${source.label}-${column.title}`] = sourceSummaryRow[column.title];
+    }
+  }
+
+  const summaryName = getUniqueSheetName(
+    reportDefinition.summarySheetName || "汇总",
+    usedSheetNames
+  );
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet([summaryRow]),
+    summaryName
+  );
+
+  for (const source of reportDefinition.sources) {
+    if (!source.includeDetails) {
+      continue;
+    }
+
+    const sourceReport = reportDefinitionMap[source.reportId];
+    const capture = capturesByReportId[source.reportId];
+    for (const sheetDefinition of sourceReport.sheets) {
+      if (sheetDefinition.name === source.summarySheetName) {
+        continue;
+      }
+
+      const sheet = capture
+        ? XLSX.utils.json_to_sheet(buildSheetRows(sheetDefinition, capture))
+        : createEmptySheet(sheetDefinition.columns);
+      const sheetName = getUniqueSheetName(
+        `${source.label}-${sheetDefinition.name}`,
+        usedSheetNames
+      );
+      XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+    }
   }
 
   return workbook;
@@ -297,7 +387,7 @@ function validateReportDefinition(report) {
     throw new Error("报表配置不能为空。");
   }
 
-  const requiredFields = ["id", "name", "pageUrl", "requestMatch", "fileNamePrefix"];
+  const requiredFields = ["id", "name", "fileNamePrefix"];
   for (const field of requiredFields) {
     if (typeof report[field] !== "string" || report[field].trim() === "") {
       throw new Error(`报表字段 ${field} 必填。`);
@@ -309,6 +399,75 @@ function validateReportDefinition(report) {
   }
   if (report.queryDatePath != null && typeof report.queryDatePath !== "string") {
     throw new Error("报表字段 queryDatePath 必须是文本。");
+  }
+
+  if (isCombinedReport(report)) {
+    if (
+      report.summarySheetName != null &&
+      (typeof report.summarySheetName !== "string" || report.summarySheetName.trim() === "")
+    ) {
+      throw new Error("组合报表汇总 Sheet 名称不能为空。");
+    }
+    if (!Array.isArray(report.sources)) {
+      throw new Error("组合报表数据来源配置无效。");
+    }
+
+    const sourceLabels = new Set();
+    const sourceReportIds = new Set();
+    const definitionMap = getReportDefinitionMap();
+    for (const [sourceIndex, source] of report.sources.entries()) {
+      const label = `第 ${sourceIndex + 1} 个数据来源`;
+      if (!source || typeof source !== "object") {
+        throw new Error(`${label} 配置无效。`);
+      }
+      if (typeof source.label !== "string" || source.label.trim() === "") {
+        throw new Error(`${label} 名称必填。`);
+      }
+      if (sourceLabels.has(source.label)) {
+        throw new Error(`数据来源名称不能重复：${source.label}。`);
+      }
+      sourceLabels.add(source.label);
+      if (typeof source.reportId !== "string" || source.reportId.trim() === "") {
+        throw new Error(`${label} 必须选择单页报表。`);
+      }
+      if (sourceReportIds.has(source.reportId)) {
+        throw new Error(`组合报表中不能重复选择同一单页报表：${source.label}。`);
+      }
+      sourceReportIds.add(source.reportId);
+      const sourceReport = definitionMap[source.reportId];
+      if (!sourceReport || isCombinedReport(sourceReport)) {
+        throw new Error(`${label} 引用的单页报表不存在。`);
+      }
+      const sourceSheet = sourceReport.sheets?.find(
+        (sheet) => sheet.name === source.summarySheetName
+      );
+      if (!sourceSheet || !["last", "object"].includes(sourceSheet.mode)) {
+        throw new Error(`${label} 必须选择 mode 为 last 或 object 的汇总 Sheet。`);
+      }
+      if (!Array.isArray(source.columns) || source.columns.length === 0) {
+        throw new Error(`${label} 至少需要选择一个汇总字段。`);
+      }
+      if (
+        source.columns.some(
+          (title) =>
+            !sourceSheet.columns.some(
+              (column) => column.title === title && column.value !== "$queryDate"
+            )
+        )
+      ) {
+        throw new Error(`${label} 包含不存在的汇总字段。`);
+      }
+      if (typeof source.includeDetails !== "boolean") {
+        throw new Error(`${label} 的附带明细选项无效。`);
+      }
+    }
+    return;
+  }
+
+  for (const field of ["pageUrl", "requestMatch"]) {
+    if (typeof report[field] !== "string" || report[field].trim() === "") {
+      throw new Error(`报表字段 ${field} 必填。`);
+    }
   }
 
   if (!Array.isArray(report.sheets) || report.sheets.length === 0) {
@@ -378,6 +537,7 @@ function validateReportDefinition(report) {
 function listReportsForRenderer() {
   return activeReports.map((definition) => ({
     id: definition.id,
+    type: definition.type || "single",
     name: definition.name,
     description: definition.description || "",
     pageUrl: definition.pageUrl,
@@ -424,6 +584,15 @@ ipcMain.handle("capture:get-latest", async (_event, payload) => {
   return captureCache.get(`${webContentsId}:${reportId}`) || null;
 });
 
+ipcMain.handle("capture:clear", async (_event, payload) => {
+  const webContentsId = payload?.webContentsId;
+  const reportIds = Array.isArray(payload?.reportIds) ? payload.reportIds : [];
+  for (const reportId of reportIds) {
+    captureCache.delete(`${webContentsId}:${reportId}`);
+  }
+  return { cleared: true };
+});
+
 ipcMain.handle("report:export", async (_event, payload) => {
   const reportDefinition = getReportDefinitionMap()[payload?.reportId];
   if (!reportDefinition) {
@@ -431,6 +600,24 @@ ipcMain.handle("report:export", async (_event, payload) => {
   }
 
   validateReportDefinition(reportDefinition);
+
+  if (isCombinedReport(reportDefinition)) {
+    const workbook = buildCombinedWorkbook(reportDefinition, payload?.captures);
+    const defaultPath = path.join(
+      app.getPath("downloads"),
+      `${reportDefinition.fileNamePrefix}-${fallbackDate(0)}.xlsx`
+    );
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: `导出 ${reportDefinition.name}`,
+      defaultPath,
+      filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }]
+    });
+    if (canceled || !filePath) {
+      return { canceled: true };
+    }
+    XLSX.writeFile(workbook, filePath);
+    return { canceled: false, filePath };
+  }
 
   if (!payload?.data?.success) {
     throw new Error("当前没有可导出的接口响应数据。");
@@ -488,6 +675,14 @@ ipcMain.handle("reports:save", async (_event, payload) => {
 
 ipcMain.handle("reports:delete", async (_event, payload) => {
   const reportId = payload?.reportId;
+  const dependentReport = activeReports.find(
+    (report) =>
+      isCombinedReport(report) &&
+      report.sources.some((source) => source.reportId === reportId)
+  );
+  if (dependentReport) {
+    throw new Error(`该报表正被组合报表“${dependentReport.name}”使用，不能删除。`);
+  }
   activeReports = activeReports.filter((item) => item.id !== reportId);
 
   if (activeReports.length === 0) {
