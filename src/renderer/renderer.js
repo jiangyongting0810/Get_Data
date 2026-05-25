@@ -89,14 +89,106 @@ function refreshReportSelect() {
   }
 }
 
+function setText(id, text) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = text;
+  }
+}
+
+function renderOverview(report) {
+  const modeBadge = document.getElementById("report-mode-badge");
+  setText("report-name-preview", report?.name || "未选择报表");
+
+  if (isCombinedReport(report)) {
+    modeBadge.textContent = "组合报表";
+    setText(
+      "report-hint",
+      "当前是组合报表。先确认来源配置，再按顺序采集每个来源页面。"
+    );
+  } else {
+    modeBadge.textContent = "普通报表";
+    setText(
+      "report-hint",
+      "当前是单页报表。先检查页面 URL 和接口关键字，再等待页面返回目标接口。"
+    );
+  }
+}
+
+function updateConfigSectionSummaries() {
+  const name = formFields.name?.value?.trim() || "";
+  const description = formFields.description?.value?.trim() || "";
+  const fileNamePrefix = formFields.fileNamePrefix?.value?.trim() || "";
+  const pageUrl = formFields.pageUrl?.value?.trim() || "";
+  const requestMatch = formFields.requestMatch?.value?.trim() || "";
+  const queryDatePath = formFields.queryDatePath?.value?.trim() || "";
+  const defaultDateOffset = formFields.defaultDateOffset?.value?.trim() || "";
+  const combinedTarget =
+    formFields.targetCombinedReport?.selectedOptions?.[0]?.textContent || "";
+  const summarySheet = formFields.sourceSummarySheet?.value || "";
+  const checkedColumns = formFields.sourceSummaryColumns
+    ? [...formFields.sourceSummaryColumns.querySelectorAll("input:checked")].length
+    : 0;
+  const combinedSourcesCount = document.querySelectorAll(".combined-source-row").length;
+
+  setText(
+    "base-section-summary",
+    name
+      ? `${name}${description ? `｜${description}` : ""}${fileNamePrefix ? `｜文件名前缀 ${fileNamePrefix}` : ""}`
+      : "未填写报表名称和描述"
+  );
+
+  setText(
+    "capture-section-summary",
+    pageUrl || requestMatch
+      ? `${pageUrl ? "已配置页面" : "未配页面"}｜${requestMatch ? `关键字 ${requestMatch}` : "未配关键字"}${
+          queryDatePath ? `｜日期路径 ${queryDatePath}` : ""
+        }${defaultDateOffset ? `｜偏移 ${defaultDateOffset}` : ""}`
+      : "未配置页面 URL 和接口关键字"
+  );
+
+  let sheetsSummary = "未配置 Sheet";
+  try {
+    const sheets = JSON.parse(formFields.sheetsJson?.value || "[]");
+    if (Array.isArray(sheets) && sheets.length > 0) {
+      sheetsSummary = `共 ${sheets.length} 个 Sheet｜${sheets
+        .map((sheet) => sheet.name)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join("、")}`;
+    }
+  } catch (_error) {
+    sheetsSummary = "Sheets JSON 格式有误";
+  }
+  setText("sheets-section-summary", sheetsSummary);
+
+  setText(
+    "combine-section-summary",
+    combinedTarget || summarySheet || checkedColumns
+      ? `${combinedTarget ? `目标 ${combinedTarget}` : "未选目标"}${
+          summarySheet ? `｜汇总 Sheet ${summarySheet}` : ""
+        }${checkedColumns ? `｜已选 ${checkedColumns} 个字段` : ""}`
+      : "选择目标组合报表并决定汇总字段"
+  );
+
+  setText(
+    "combined-section-summary",
+    combinedSourcesCount > 0
+      ? `已加入 ${combinedSourcesCount} 个数据来源`
+      : "查看当前组合报表已加入的数据来源"
+  );
+}
+
 function renderReportMeta(report) {
-  document.getElementById("report-description").textContent =
-    report.description || "";
-  document.getElementById("report-config-path").textContent =
-    `配置文件：${appConfig.reportsConfigPath}`;
-  document.getElementById("entry-url").textContent = isCombinedReport(report)
-    ? "组合报表：按数据来源逐页采集并合并导出。"
-    : `接口关键字：${report.requestMatch || "未填写"}`;
+  setText("report-description", report.description || "未填写描述。");
+  setText("report-config-path", `配置文件：${appConfig.reportsConfigPath}`);
+  setText(
+    "entry-url",
+    isCombinedReport(report)
+      ? "组合报表将按来源顺序逐页采集。"
+      : `接口关键字：${report.requestMatch || "未填写"}`
+  );
+  renderOverview(report);
 }
 
 function fillForm(report) {
@@ -114,6 +206,7 @@ function fillForm(report) {
   if (combined) {
     formFields.combinedSummarySheetName.value = raw.summarySheetName || "汇总";
     renderCombinedSources(raw.sources || []);
+    updateConfigSectionSummaries();
     return;
   }
 
@@ -125,6 +218,7 @@ function fillForm(report) {
   formFields.sheetsJson.value = JSON.stringify(raw.sheets || [], null, 2);
   formFields.addToCombinedStatus.textContent = "";
   renderAssociationEditor();
+  updateConfigSectionSummaries();
 }
 
 function getEditableSummarySheets() {
@@ -159,6 +253,7 @@ function populateCombinedReportTargets() {
     option.textContent = "请先新建并保存组合报表";
     select.appendChild(option);
     formFields.addToCombinedButton.disabled = true;
+    updateConfigSectionSummaries();
     return;
   }
 
@@ -173,6 +268,7 @@ function populateCombinedReportTargets() {
     select.value = currentValue;
   }
   formFields.addToCombinedButton.disabled = false;
+  updateConfigSectionSummaries();
 }
 
 function renderAssociationEditor() {
@@ -198,6 +294,7 @@ function renderAssociationEditor() {
 
   formFields.sourceIncludeDetails.checked = Boolean(association?.includeDetails);
   renderAssociationColumns(association?.columns);
+  updateConfigSectionSummaries();
 }
 
 function renderAssociationColumns(selectedColumns) {
@@ -210,6 +307,7 @@ function renderAssociationColumns(selectedColumns) {
   if (!sheet) {
     picker.textContent =
       "当前 Sheets JSON 中没有 mode 为 last 或 object 的汇总 Sheet。";
+    updateConfigSectionSummaries();
     return;
   }
 
@@ -221,19 +319,22 @@ function renderAssociationColumns(selectedColumns) {
     if (column.value === "$queryDate") {
       continue;
     }
+
     const label = document.createElement("label");
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.value = column.title;
     checkbox.checked = selectedSet ? selectedSet.has(column.title) : true;
+    checkbox.addEventListener("change", updateConfigSectionSummaries);
     label.appendChild(checkbox);
     label.appendChild(document.createTextNode(column.title));
     picker.appendChild(label);
   }
 
   const note = document.createElement("span");
-  note.textContent = "日期列将自动输出";
+  note.textContent = "日期列会自动输出";
   picker.appendChild(note);
+  updateConfigSectionSummaries();
 }
 
 function createCombinedSourceRow(source = {}) {
@@ -253,6 +354,7 @@ function createCombinedSourceRow(source = {}) {
   removeButton.textContent = "移除";
   removeButton.addEventListener("click", () => {
     row.remove();
+    updateConfigSectionSummaries();
   });
 
   header.appendChild(title);
@@ -260,7 +362,7 @@ function createCombinedSourceRow(source = {}) {
 
   const summary = document.createElement("p");
   summary.className = "combined-source-summary";
-  const detailText = source.includeDetails ? "；附带明细 Sheet" : "";
+  const detailText = source.includeDetails ? "；保留其他明细 Sheet" : "";
   summary.textContent = `汇总 Sheet：${source.summarySheetName || "未选择"}；字段：${
     (source.columns || []).join("、") || "未选择"
   }${detailText}`;
@@ -276,6 +378,7 @@ function renderCombinedSources(sources) {
   for (const source of sources) {
     container.appendChild(createCombinedSourceRow(source));
   }
+  updateConfigSectionSummaries();
 }
 
 function readCombinedSources() {
@@ -287,16 +390,15 @@ function readCombinedSources() {
 function resetCaptureState(message) {
   latestCapture = null;
   document.getElementById("export-report").disabled = true;
-  document.getElementById("capture-status").textContent = message;
+  setText("capture-status", message);
 }
 
 function renderCombinedStatus() {
   const container = document.getElementById("combined-source-status");
-  const progress = document.getElementById("combined-progress");
   container.innerHTML = "";
 
   if (!combinedSession) {
-    progress.textContent = "开始后将依次打开各数据来源页面。";
+    setText("combined-progress", "开始后将依次打开各数据来源页面。");
     return;
   }
 
@@ -304,12 +406,14 @@ function renderCombinedStatus() {
     ["confirmed", "skipped"].includes(state.status)
   ).length;
 
-  progress.textContent =
+  setText(
+    "combined-progress",
     finished === combinedSession.states.length
       ? "采集流程已结束，可以导出组合报表。"
       : `正在处理第 ${combinedSession.currentIndex + 1} / ${
           combinedSession.states.length
-        } 个来源。`;
+        } 个来源。`
+  );
 
   for (const state of combinedSession.states) {
     const item = document.createElement("div");
@@ -321,10 +425,10 @@ function renderCombinedStatus() {
     const status = document.createElement("span");
     const statusText = {
       pending: "等待处理",
-      collecting: "页面已打开，请在页面中触发所需数据",
+      collecting: "页面已打开，请在页面中触发目标接口",
       captured: `已捕获数据，日期：${state.queryDate || "未知"}`,
       confirmed: `已确认，日期：${state.queryDate || "未知"}`,
-      skipped: "已跳过，导出时对应汇总字段留空"
+      skipped: "已跳过，导出时该来源对应字段留空"
     };
     status.textContent = statusText[state.status] || state.status;
 
@@ -365,8 +469,7 @@ async function openCurrentCombinedSource(webview) {
   state.status = "collecting";
   document.getElementById("confirm-combined-source").disabled = true;
   document.getElementById("skip-combined-source").disabled = false;
-  document.getElementById("capture-status").textContent =
-    `正在采集：${state.source.label}。请在页面内触发目标接口。`;
+  setText("capture-status", `正在采集：${state.source.label}。请在页面内触发目标接口。`);
   webview.setAttribute("src", sourceReport.pageUrl);
   renderCombinedStatus();
 }
@@ -376,8 +479,7 @@ async function startCombinedCollection(webview) {
   const sources = raw.sources || [];
 
   if (!isCombinedReport(activeReport) || sources.length === 0) {
-    document.getElementById("combined-progress").textContent =
-      "请先保存至少包含一个来源的组合报表配置。";
+    setText("combined-progress", "请先保存至少包含一个来源的组合报表配置。");
     return;
   }
 
@@ -424,8 +526,7 @@ async function loadActiveReportIntoWebview(webview) {
   updateRunMode(activeReport);
   resetCombinedSession();
   resetCaptureState("等待当前报表页面发出目标接口...");
-  document.getElementById("export-status").textContent =
-    "导出完成后会显示保存路径。";
+  setText("export-status", "导出完成后会显示保存路径。");
 
   if (!isCombinedReport(activeReport) && activeReport.pageUrl) {
     webview.setAttribute("src", activeReport.pageUrl);
@@ -489,6 +590,31 @@ async function replaceConfig(newConfig) {
   }
 }
 
+function bindSummaryInputs() {
+  [
+    formFields.name,
+    formFields.description,
+    formFields.fileNamePrefix,
+    formFields.pageUrl,
+    formFields.requestMatch,
+    formFields.queryDatePath,
+    formFields.defaultDateOffset,
+    formFields.sheetsJson,
+    formFields.targetCombinedReport,
+    formFields.sourceSummarySheet,
+    formFields.sourceIncludeDetails,
+    formFields.combinedSummarySheetName
+  ]
+    .filter(Boolean)
+    .forEach((element) => {
+      const eventName =
+        element.tagName === "SELECT" || element.type === "checkbox"
+          ? "change"
+          : "input";
+      element.addEventListener(eventName, updateConfigSectionSummaries);
+    });
+}
+
 async function bootstrap() {
   formFields.name = document.getElementById("report-name");
   formFields.description = document.getElementById("report-description-input");
@@ -526,21 +652,20 @@ async function bootstrap() {
   const saveReportButton = document.getElementById("save-report");
   const deleteReportButton = document.getElementById("delete-report");
   const resetDefaultsButton = document.getElementById("reset-defaults");
-  const captureStatus = document.getElementById("capture-status");
-  const exportStatus = document.getElementById("export-status");
-  const configStatus = document.getElementById("config-status");
   const webview = document.getElementById("pdd-webview");
   const startCombinedButton = document.getElementById("start-combined");
   const confirmCombinedButton = document.getElementById("confirm-combined-source");
   const skipCombinedButton = document.getElementById("skip-combined-source");
   const exportCombinedButton = document.getElementById("export-combined");
 
+  bindSummaryInputs();
+
   appConfig = await window.desktopApp.getConfig();
   refreshReportSelect();
 
   activeReport = appConfig.reports[0] || null;
   if (!activeReport) {
-    captureStatus.textContent = "当前没有可用的报表配置。";
+    setText("capture-status", "当前没有可用的报表配置。");
     return;
   }
 
@@ -559,7 +684,7 @@ async function bootstrap() {
     renderReportMeta(blankReport);
     updateRunMode(blankReport);
     resetCombinedSession();
-    configStatus.textContent = "已生成新报表草稿，填写后点击保存。";
+    setText("config-status", "已生成新报表草稿，填写后保存。");
     resetCaptureState("新报表草稿尚未保存。");
   });
 
@@ -570,15 +695,11 @@ async function bootstrap() {
     renderReportMeta(blankReport);
     updateRunMode(blankReport);
     resetCombinedSession();
-    configStatus.textContent =
-      "已生成组合报表草稿，保存后即可从单页报表加入数据。";
+    setText("config-status", "已生成组合报表草稿，保存后再添加数据来源。");
     resetCaptureState("组合报表草稿尚未保存。");
   });
 
-  formFields.targetCombinedReport.addEventListener("change", () => {
-    renderAssociationEditor();
-  });
-
+  formFields.targetCombinedReport.addEventListener("change", renderAssociationEditor);
   formFields.sourceSummarySheet.addEventListener("change", () => {
     renderAssociationColumns();
   });
@@ -606,7 +727,7 @@ async function bootstrap() {
       ].map((checkbox) => checkbox.value);
 
       if (!summarySheetName || columns.length === 0) {
-        throw new Error("请选择汇总 Sheet，并至少勾选一个汇总字段。");
+        throw new Error("请选择汇总 Sheet，并至少勾选一个字段。");
       }
 
       const report = readFormReport();
@@ -652,10 +773,10 @@ async function bootstrap() {
       formFields.targetCombinedReport.value = targetCombinedId;
       renderAssociationEditor();
 
-      formFields.addToCombinedStatus.textContent = `已加入组合报表：${targetCombined.name}`;
-      configStatus.textContent = `已保存配置：${activeReport.name}`;
+      setText("add-to-combined-status", `已加入组合报表：${targetCombined.name}`);
+      setText("config-status", `已保存配置：${activeReport.name}`);
     } catch (error) {
-      formFields.addToCombinedStatus.textContent = `加入失败：${error.message}`;
+      setText("add-to-combined-status", `加入失败：${error.message}`);
     }
   });
 
@@ -670,10 +791,10 @@ async function bootstrap() {
       await replaceConfig(newConfig);
       activeReport = getReportById(report.id);
       reportSelect.value = activeReport.id;
-      configStatus.textContent = `已保存配置：${activeReport.name}`;
+      setText("config-status", `已保存配置：${activeReport.name}`);
       await loadActiveReportIntoWebview(webview);
     } catch (error) {
-      configStatus.textContent = `保存失败：${error.message}`;
+      setText("config-status", `保存失败：${error.message}`);
     }
   });
 
@@ -690,11 +811,11 @@ async function bootstrap() {
       activeReport = appConfig.reports[0] || null;
       if (activeReport) {
         reportSelect.value = activeReport.id;
-        configStatus.textContent = "已删除当前报表。";
+        setText("config-status", "已删除当前报表。");
         await loadActiveReportIntoWebview(webview);
       }
     } catch (error) {
-      configStatus.textContent = `删除失败：${error.message}`;
+      setText("config-status", `删除失败：${error.message}`);
     }
   });
 
@@ -704,20 +825,20 @@ async function bootstrap() {
     activeReport = appConfig.reports[0] || null;
     if (activeReport) {
       reportSelect.value = activeReport.id;
-      configStatus.textContent = "已恢复默认报表。";
+      setText("config-status", "已恢复默认报表。");
       await loadActiveReportIntoWebview(webview);
     }
   });
 
   reloadButton.addEventListener("click", () => {
     resetCaptureState("页面已刷新，等待重新捕获当前报表接口。");
-    exportStatus.textContent = "页面已刷新。";
+    setText("export-status", "页面已刷新。");
     webview.reload();
   });
 
   openPageButton.addEventListener("click", () => {
     if (!activeReport?.pageUrl) {
-      exportStatus.textContent = "当前报表还没有页面 URL。";
+      setText("export-status", "当前报表还没有页面 URL。");
       return;
     }
 
@@ -727,20 +848,21 @@ async function bootstrap() {
 
   exportButton.addEventListener("click", async () => {
     if (!latestCapture || !activeReport) {
-      exportStatus.textContent = "还没有当前报表的可导出数据。";
+      setText("export-status", "当前还没有可导出的报表数据。");
       return;
     }
 
     exportButton.disabled = true;
-    exportStatus.textContent = "正在导出 Excel...";
+    setText("export-status", "正在导出 Excel...");
 
     try {
       const result = await window.desktopApp.exportReport(latestCapture);
-      exportStatus.textContent = result.canceled
-        ? "已取消导出。"
-        : `导出完成：${result.filePath}`;
+      setText(
+        "export-status",
+        result.canceled ? "已取消导出。" : `导出完成：${result.filePath}`
+      );
     } catch (error) {
-      exportStatus.textContent = `导出失败：${error.message}`;
+      setText("export-status", `导出失败：${error.message}`);
     } finally {
       exportButton.disabled = false;
     }
@@ -768,24 +890,25 @@ async function bootstrap() {
     }
 
     exportCombinedButton.disabled = true;
-    exportStatus.textContent = "正在导出组合 Excel...";
+    setText("export-status", "正在导出组合 Excel...");
     try {
       const result = await window.desktopApp.exportReport({
         reportId: activeReport.id,
         captures: combinedSession.captures
       });
-      exportStatus.textContent = result.canceled
-        ? "已取消导出。"
-        : `导出完成：${result.filePath}`;
+      setText(
+        "export-status",
+        result.canceled ? "已取消导出。" : `导出完成：${result.filePath}`
+      );
     } catch (error) {
-      exportStatus.textContent = `导出失败：${error.message}`;
+      setText("export-status", `导出失败：${error.message}`);
     } finally {
       exportCombinedButton.disabled = false;
     }
   });
 
   webview.addEventListener("did-start-loading", () => {
-    captureStatus.textContent = "页面加载中，等待目标接口返回...";
+    setText("capture-status", "页面加载中，等待目标接口返回...");
   });
 
   window.desktopApp.onCaptureStatus(async (payload) => {
@@ -800,7 +923,7 @@ async function bootstrap() {
       }
 
       if (!payload?.ok) {
-        captureStatus.textContent = payload?.message || "接口监听异常。";
+        setText("capture-status", payload?.message || "接口监听异常。");
         return;
       }
 
@@ -810,15 +933,17 @@ async function bootstrap() {
       });
 
       if (!capture) {
-        captureStatus.textContent =
-          "已命中目标接口，但暂时拿不到响应体。";
+        setText("capture-status", "已命中目标接口，但暂时拿不到响应体。");
         return;
       }
 
       combinedSession.captures[state.source.reportId] = capture;
       state.status = "captured";
       state.queryDate = capture.queryDate;
-      captureStatus.textContent = `已捕获 ${state.source.label}，确认后进入下一来源，或选择跳过。`;
+      setText(
+        "capture-status",
+        `已捕获 ${state.source.label}，确认后进入下一来源，或选择跳过。`
+      );
       confirmCombinedButton.disabled = false;
       renderCombinedStatus();
       return;
@@ -829,7 +954,7 @@ async function bootstrap() {
     }
 
     if (!payload?.ok) {
-      captureStatus.textContent = payload?.message || "接口监听异常。";
+      setText("capture-status", payload?.message || "接口监听异常。");
       return;
     }
 
@@ -839,16 +964,19 @@ async function bootstrap() {
     });
 
     if (!capture) {
-      captureStatus.textContent = "已命中目标接口，但暂时拿不到响应体。";
+      setText("capture-status", "已命中目标接口，但暂时拿不到响应体。");
       return;
     }
 
     latestCapture = capture;
-    captureStatus.textContent = `已捕获 ${payload.reportName}，日期：${payload.queryDate}。现在可以导出。`;
+    setText(
+      "capture-status",
+      `已捕获 ${payload.reportName}，日期：${payload.queryDate}。现在可以导出。`
+    );
     exportButton.disabled = false;
   });
 }
 
 bootstrap().catch((error) => {
-  document.getElementById("entry-url").textContent = `初始化失败：${error.message}`;
+  setText("entry-url", `初始化失败：${error.message}`);
 });

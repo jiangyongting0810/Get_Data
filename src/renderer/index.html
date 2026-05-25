@@ -14,13 +14,25 @@
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand-block">
-          <p class="eyebrow">PDD Trade Exporter</p>
-          <h1>报表配置与导出工作台</h1>
+          <p class="eyebrow">Neon Control</p>
+          <h1>报表采集控制台</h1>
           <p class="summary">
-            在软件内维护报表配置、切换拼多多页面、监听真实接口响应，并按定义导出
-            Excel。
+            把报表配置、页面采集和 Excel 导出放在一条更清晰的工作流里。
           </p>
         </div>
+
+        <section class="panel">
+          <div class="section-heading">
+            <p class="section-kicker">Flow</p>
+            <h2>操作顺序</h2>
+          </div>
+          <ol class="flow-list">
+            <li>选择或新建报表</li>
+            <li>按需展开配置并保存</li>
+            <li>打开页面并等待接口返回</li>
+            <li>确认数据后导出 Excel</li>
+          </ol>
+        </section>
 
         <section class="panel">
           <div class="section-heading">
@@ -50,30 +62,41 @@
       </aside>
 
       <main class="content">
-        <section class="hero-strip">
-          <div class="hero-copy">
-            <p class="eyebrow">Workspace</p>
-            <h2>配置、采集、导出保持在一条稳定链路内</h2>
-            <p class="summary">
-              优先通过配置新增报表，只有配置表达不了时再调整主逻辑。
-            </p>
+        <section class="overview-card">
+          <div class="overview-main">
+            <div class="overview-copy">
+              <p class="eyebrow">Workspace</p>
+              <h2 id="report-name-preview">未选择报表</h2>
+              <p id="report-hint" class="summary">
+                先选择一个报表，再按需展开对应配置。
+              </p>
+            </div>
+            <div class="overview-badges">
+              <span id="report-mode-badge" class="mode-badge">普通报表</span>
+              <span class="mode-badge mode-badge-muted">配置驱动导出</span>
+            </div>
           </div>
-          <div class="hero-metrics">
-            <article class="metric-card">
-              <span class="metric-label">配置来源</span>
-              <strong>本地 reports.json</strong>
+
+          <div class="step-grid">
+            <article class="step-card">
+              <span class="step-index">01</span>
+              <strong>选报表</strong>
+              <p>先确定当前要操作的报表，再决定是编辑单页还是组合报表。</p>
             </article>
-            <article class="metric-card">
-              <span class="metric-label">监听方式</span>
-              <strong>按关键字匹配接口</strong>
+            <article class="step-card">
+              <span class="step-index">02</span>
+              <strong>开配置</strong>
+              <p>默认收起配置项，只在需要时展开对应块，减少干扰。</p>
             </article>
-            <article class="metric-card">
-              <span class="metric-label">导出结构</span>
-              <strong>按 Sheet 配置生成</strong>
+            <article class="step-card">
+              <span class="step-index">03</span>
+              <strong>跑采集</strong>
+              <p>右侧专注打开页面、查看状态并确认是否抓到目标接口。</p>
             </article>
-            <article class="metric-card">
-              <span class="metric-label">扩展原则</span>
-              <strong>先改配置，再改代码</strong>
+            <article class="step-card">
+              <span class="step-index">04</span>
+              <strong>导结果</strong>
+              <p>只有拿到有效数据后才导出，避免无效点击。</p>
             </article>
           </div>
         </section>
@@ -82,105 +105,152 @@
           <section class="workspace-card config-card">
             <div class="toolbar compact-toolbar">
               <div>
-                <p class="toolbar-title">Configuration Editor</p>
+                <p class="toolbar-title">Configuration</p>
                 <p class="toolbar-subtitle">
-                  先用 JSON 维护 Sheet 与列结构，后续再逐步增强为可视化编辑。
+                  配置区已改为折叠交互。先看摘要，需要时再展开编辑。
                 </p>
               </div>
             </div>
 
-            <div class="form-grid">
-              <label class="form-block">
-                <span class="field-label">报表名称</span>
-                <input id="report-name" class="field-input" />
-              </label>
-              <label class="form-block form-block-wide">
-                <span class="field-label">描述</span>
-                <input id="report-description-input" class="field-input" />
-              </label>
-              <label class="form-block form-block-wide single-report-field">
-                <span class="field-label">页面 URL</span>
-                <input id="report-page-url" class="field-input" />
-              </label>
-              <label class="form-block form-block-wide single-report-field">
-                <span class="field-label">接口关键字</span>
-                <input id="report-request-match" class="field-input" />
-              </label>
-              <label class="form-block">
-                <span class="field-label">导出文件名前缀</span>
-                <input id="report-file-name-prefix" class="field-input" />
-              </label>
-              <label class="form-block single-report-field">
-                <span class="field-label">日期字段路径</span>
-                <input id="report-query-date-path" class="field-input" />
-              </label>
-              <label class="form-block single-report-field">
-                <span class="field-label">默认日期偏移</span>
-                <input id="report-default-date-offset" class="field-input" />
-              </label>
-              <label class="form-block form-block-wide single-report-field">
-                <span class="field-label">Sheets JSON</span>
-                <textarea id="report-sheets-json" class="field-textarea" spellcheck="false"></textarea>
-              </label>
-
-              <section
-                id="add-to-combined-fields"
-                class="form-block form-block-wide single-report-field feature-panel"
-              >
-                <div class="section-heading">
-                  <p class="section-kicker">Combine</p>
-                  <h2>加入组合报表</h2>
-                </div>
-                <p class="note-text">
-                  当前单页报表保存后，可以作为一个来源加入组合报表；后续更新时会覆盖同源配置。
-                </p>
-                <div class="association-grid">
-                  <label class="form-block">
-                    <span class="field-label">目标组合报表</span>
-                    <select id="target-combined-report" class="field-input"></select>
-                  </label>
-                  <label class="form-block">
-                    <span class="field-label">当前页面汇总 Sheet</span>
-                    <select id="source-summary-sheet" class="field-input"></select>
-                  </label>
-                </div>
-                <p class="field-label association-label">拼入主汇总表的字段</p>
-                <div id="source-summary-columns" class="combined-column-picker"></div>
-                <label class="detail-toggle note-text">
-                  <input id="source-include-details" type="checkbox" />
-                  附带导出当前页面的其他明细 Sheet
-                </label>
-                <button id="add-to-combined" class="primary-button association-button" type="button">
-                  保存并加入组合报表
-                </button>
-                <p id="add-to-combined-status" class="note-text status-inline"></p>
-              </section>
-
-              <section id="combined-fields" class="form-block form-block-wide feature-panel combined-fields" hidden>
-                <label class="form-block">
-                  <span class="field-label">主汇总 Sheet 名称</span>
-                  <input id="combined-summary-sheet-name" class="field-input" value="汇总" />
-                </label>
-                <div class="combined-source-header">
-                  <div class="section-heading">
-                    <p class="section-kicker">Sources</p>
-                    <h2>已加入的数据来源</h2>
+            <div class="config-sections">
+              <details class="config-drawer" open>
+                <summary class="config-drawer-summary">
+                  <div class="config-drawer-heading">
+                    <p class="section-kicker">Base</p>
+                    <h2>基础信息</h2>
+                  </div>
+                  <p id="base-section-summary" class="drawer-summary-text">未填写报表名称和描述</p>
+                </summary>
+                <div class="config-drawer-body">
+                  <div class="form-grid">
+                    <label class="form-block">
+                      <span class="field-label">报表名称</span>
+                      <input id="report-name" class="field-input" />
+                    </label>
+                    <label class="form-block form-block-wide">
+                      <span class="field-label">描述</span>
+                      <input id="report-description-input" class="field-input" />
+                    </label>
+                    <label class="form-block">
+                      <span class="field-label">导出文件名前缀</span>
+                      <input id="report-file-name-prefix" class="field-input" />
+                    </label>
                   </div>
                 </div>
-                <p class="note-text">
-                  数据来源请到对应的单页报表配置中添加；这里用于查看和移除已加入内容。
-                </p>
-                <div id="combined-sources" class="combined-source-list"></div>
-              </section>
+              </details>
+
+              <details class="config-drawer single-report-field">
+                <summary class="config-drawer-summary">
+                  <div class="config-drawer-heading">
+                    <p class="section-kicker">Capture</p>
+                    <h2>页面与接口</h2>
+                  </div>
+                  <p id="capture-section-summary" class="drawer-summary-text">未配置页面 URL 和接口关键字</p>
+                </summary>
+                <div class="config-drawer-body">
+                  <div class="form-grid">
+                    <label class="form-block form-block-wide">
+                      <span class="field-label">页面 URL</span>
+                      <input id="report-page-url" class="field-input" />
+                    </label>
+                    <label class="form-block form-block-wide">
+                      <span class="field-label">接口关键字</span>
+                      <input id="report-request-match" class="field-input" />
+                    </label>
+                    <label class="form-block">
+                      <span class="field-label">日期字段路径</span>
+                      <input id="report-query-date-path" class="field-input" />
+                    </label>
+                    <label class="form-block">
+                      <span class="field-label">默认日期偏移</span>
+                      <input id="report-default-date-offset" class="field-input" />
+                    </label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="config-drawer single-report-field">
+                <summary class="config-drawer-summary">
+                  <div class="config-drawer-heading">
+                    <p class="section-kicker">Sheets</p>
+                    <h2>导出结构</h2>
+                  </div>
+                  <p id="sheets-section-summary" class="drawer-summary-text">未配置 Sheet</p>
+                </summary>
+                <div class="config-drawer-body">
+                  <label class="form-block form-block-wide">
+                    <span class="field-label">Sheets JSON</span>
+                    <textarea id="report-sheets-json" class="field-textarea" spellcheck="false"></textarea>
+                  </label>
+                </div>
+              </details>
+
+              <details
+                id="add-to-combined-fields"
+                class="config-drawer single-report-field feature-panel"
+              >
+                <summary class="config-drawer-summary">
+                  <div class="config-drawer-heading">
+                    <p class="section-kicker">Combine</p>
+                    <h2>加入组合报表</h2>
+                  </div>
+                  <p id="combine-section-summary" class="drawer-summary-text">选择目标组合报表并决定汇总字段</p>
+                </summary>
+                <div class="config-drawer-body">
+                  <p class="note-text">
+                    当前单页报表配置完成后，再把它加入组合报表，避免两边来回切换时丢失上下文。
+                  </p>
+                  <div class="association-grid">
+                    <label class="form-block">
+                      <span class="field-label">目标组合报表</span>
+                      <select id="target-combined-report" class="field-input"></select>
+                    </label>
+                    <label class="form-block">
+                      <span class="field-label">当前页面汇总 Sheet</span>
+                      <select id="source-summary-sheet" class="field-input"></select>
+                    </label>
+                  </div>
+                  <p class="field-label association-label">拼入主汇总表的字段</p>
+                  <div id="source-summary-columns" class="combined-column-picker"></div>
+                  <label class="detail-toggle note-text">
+                    <input id="source-include-details" type="checkbox" />
+                    同时保留当前页面的其他明细 Sheet
+                  </label>
+                  <button id="add-to-combined" class="primary-button association-button" type="button">
+                    保存并加入组合报表
+                  </button>
+                  <p id="add-to-combined-status" class="note-text status-inline"></p>
+                </div>
+              </details>
+
+              <details id="combined-fields" class="config-drawer feature-panel" hidden>
+                <summary class="config-drawer-summary">
+                  <div class="config-drawer-heading">
+                    <p class="section-kicker">Combined</p>
+                    <h2>组合报表结构</h2>
+                  </div>
+                  <p id="combined-section-summary" class="drawer-summary-text">查看当前组合报表已加入的数据来源</p>
+                </summary>
+                <div class="config-drawer-body">
+                  <label class="form-block">
+                    <span class="field-label">主汇总 Sheet 名称</span>
+                    <input id="combined-summary-sheet-name" class="field-input" value="汇总" />
+                  </label>
+                  <p class="note-text">
+                    这里用于查看和移除已加入的数据来源。新增来源请回到对应单页报表中操作。
+                  </p>
+                  <div id="combined-sources" class="combined-source-list"></div>
+                </div>
+              </details>
             </div>
           </section>
 
           <section class="workspace-card run-card">
             <div class="toolbar">
               <div>
-                <p class="toolbar-title">Runtime Panel</p>
+                <p class="toolbar-title">Runtime</p>
                 <p class="toolbar-subtitle">
-                  切换报表后自动打开对应页面，并监听该页面真实发出的目标接口。
+                  右侧负责页面打开、状态监听和导出动作，不再混合配置编辑。
                 </p>
               </div>
               <div id="single-page-actions" class="toolbar-actions">
@@ -190,10 +260,19 @@
               </div>
             </div>
 
-            <div class="log-box">
-              <p id="entry-url" class="log-line">正在读取报表配置...</p>
-              <p id="capture-status" class="log-line muted">尚未捕获到当前报表的接口响应。</p>
-              <p id="export-status" class="log-line muted">导出完成后会显示保存路径。</p>
+            <div class="status-board">
+              <article class="status-tile">
+                <span class="status-label">当前入口</span>
+                <p id="entry-url" class="status-value">正在读取报表配置...</p>
+              </article>
+              <article class="status-tile">
+                <span class="status-label">采集状态</span>
+                <p id="capture-status" class="status-value muted">尚未捕获到当前报表的接口响应。</p>
+              </article>
+              <article class="status-tile">
+                <span class="status-label">导出结果</span>
+                <p id="export-status" class="status-value muted">导出完成后会显示保存路径。</p>
+              </article>
             </div>
 
             <section id="combined-run-panel" class="feature-panel combined-run-panel" hidden>
